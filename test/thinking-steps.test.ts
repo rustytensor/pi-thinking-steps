@@ -11,6 +11,8 @@ import {
 	assertPatchableAssistantMessageComponent,
 	assertThinkingStepsTheme,
 	importPiCodingAgentInternal,
+	isStreamingArgument,
+	needsIsStreamingThunk,
 	PI_CODING_AGENT_INTERNAL_MODULES,
 	resolvePiCodingAgentInternalModuleUrl,
 	retainThinkingStepsPatch,
@@ -388,6 +390,32 @@ describe("patch guards", () => {
 	});
 });
 
+describe("isStreaming argument compatibility", () => {
+	it("builds a transform that renders without throwing and reports a boolean isStreaming", async () => {
+		const host = await importPiCodingAgentInternal<{
+			createMarkdownTransform(messageType: "assistant", isStreaming: boolean | (() => boolean), transformers: MarkdownTransformer[]): (markdown: string, availableWidth: number) => string;
+		}>(PI_CODING_AGENT_INTERNAL_MODULES.markdownTransform);
+		let seen: unknown;
+		const transform = host.createMarkdownTransform("assistant", isStreamingArgument({ isStreaming: true }), [
+			(markdown, context) => {
+				seen = context.isStreaming;
+				return markdown;
+			},
+		]);
+
+		assert.equal(transform("hello", 80), "hello");
+		assert.equal(seen, true);
+	});
+
+	it("only asks for the thunk on pi >=1.5", () => {
+		assert.equal(needsIsStreamingThunk("0.99.2"), false);
+		assert.equal(needsIsStreamingThunk("1.0.0"), false);
+		assert.equal(needsIsStreamingThunk("1.4.9"), false);
+		assert.equal(needsIsStreamingThunk("1.5.0"), true);
+		assert.equal(needsIsStreamingThunk("2.0.0"), true);
+		assert.equal(needsIsStreamingThunk("garbage"), true);
+	});
+});
 
 describe("iconForThinkingRole", () => {
 	it("uses a restrained icon set with distinct inspect and search glyphs", () => {

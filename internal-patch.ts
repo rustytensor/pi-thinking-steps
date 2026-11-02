@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { AssistantMessage, ThinkingContent } from "@earendil-works/pi-ai";
-import { AssistantMessageComponent as HostAssistantMessageComponent, getPackageDir, type MarkdownTransformer } from "@earendil-works/pi-coding-agent";
+import { AssistantMessageComponent as HostAssistantMessageComponent, getPackageDir, VERSION, type MarkdownTransformer } from "@earendil-works/pi-coding-agent";
 import { Markdown, Spacer, Text, type Component, type MarkdownOptions, type MarkdownTheme } from "@earendil-works/pi-tui";
 import { decrementPatchRefCount, getPatchCleanup, getPatchInstallPromise, incrementPatchRefCount, resolveThinkingMessageScope, setPatchCleanup, setPatchInstallPromise } from "./state.js";
 import { ThinkingStepsComponent } from "./render.js";
@@ -78,18 +78,6 @@ function hasPatchableContentContainer(value: AssistantMessageComponentPrototype)
 	);
 }
 
-function fallbackToOriginalUpdateContent(
-	instance: AssistantMessageComponentPrototype,
-	message: AssistantMessage,
-	originalUpdateContent: (message: AssistantMessage) => void,
-): void {
-	try {
-		originalUpdateContent.call(instance, message);
-	} catch (error) {
-		throw new Error("Thinking Steps patch failed: Pi internals are incompatible and fallback rendering also failed.", { cause: error });
-	}
-}
-
 export function resolvePiCodingAgentInternalModuleUrl(relativePath: string): string {
 	try {
 		return pathToFileURL(join(getPackageDir(), relativePath)).href;
@@ -107,6 +95,17 @@ export async function importPiCodingAgentInternal<TModule>(relativePath: string)
 			cause: error,
 		});
 	}
+}
+
+export function needsIsStreamingThunk(version: string): boolean {
+	const [major = 0, minor = 0] = version.split(".").map(Number);
+	return !(major < 1 || (major === 1 && minor < 5));
+}
+
+const PI_TAKES_IS_STREAMING_THUNK = needsIsStreamingThunk(VERSION);
+
+export function isStreamingArgument(component: { isStreaming: boolean }): boolean | (() => boolean) {
+	return PI_TAKES_IS_STREAMING_THUNK ? () => component.isStreaming : component.isStreaming;
 }
 
 function hasVisibleThinking(content: ThinkingContent): boolean {
@@ -131,17 +130,13 @@ function hasVisibleTextContent(message: AssistantMessage): boolean {
 	return message.content.some((content) => content.type === "text" && content.text.trim().length > 0);
 }
 
-function hasVisibleThinkingContent(message: AssistantMessage): boolean {
-	return message.content.some((content) => content.type === "thinking" && hasVisibleThinking(content));
-}
-
 async function installPatch(providedTheme?: ThinkingThemeLike): Promise<() => void> {
 	const [{ theme: rawTheme }, { createMarkdownTransform }] = await Promise.all([
 		providedTheme === undefined
 			? importPiCodingAgentInternal<{ theme: unknown }>(PI_CODING_AGENT_INTERNAL_MODULES.theme)
 			: Promise.resolve({ theme: providedTheme }),
 		importPiCodingAgentInternal<{
-			createMarkdownTransform(messageType: "assistant", isStreaming: boolean, transformers: MarkdownTransformer[]): NonNullable<MarkdownOptions["transform"]>;
+			createMarkdownTransform(messageType: "assistant", isStreaming: boolean | (() => boolean), transformers: MarkdownTransformer[]): NonNullable<MarkdownOptions["transform"]>;
 		}>(PI_CODING_AGENT_INTERNAL_MODULES.markdownTransform),
 	]);
 
@@ -298,10 +293,11 @@ async function installPatch(providedTheme?: ThinkingThemeLike): Promise<() => vo
 				return message.content.slice(firstThinkingIndex + 1).some((content) => content.type === "text" && content.text.trim().length > 0);
 			})();
 
+			const streamingArgument = isStreamingArgument(this);
 			for (const content of message.content) {
 				if (content.type === "text" && content.text.trim()) {
 					this.contentContainer.addChild(new Markdown(content.text.trim(), this.outputPad, 0, this.markdownTheme, undefined, {
-						transform: createMarkdownTransform("assistant", this.isStreaming, this.markdownTransformers),
+						transform: createMarkdownTransform("assistant", streamingArgument, this.markdownTransformers),
 					}));
 					continue;
 				}

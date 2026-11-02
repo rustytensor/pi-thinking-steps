@@ -65,6 +65,11 @@ try {
 		assert.match(component.render(100).join("\n"), /Waiting for thinking content/);
 		component.updateContent({ ...message, content: [] }, false);
 		assert.match(component.render(100).join("\n"), /No thinking content supplied/);
+		// Text blocks go through the host's Markdown transform, which takes the streaming flag in a version-specific shape.
+		component.updateContent({ ...message, content: [{ type: "thinking", thinking: "Verify the host renderer." }, { type: "text", text: "HOST_TEXT_ANSWER" }] }, true);
+		assert.match(component.render(100).join("\n"), /HOST_TEXT_ANSWER/);
+		component.updateContent({ ...message, content: [{ type: "text", text: "HOST_TEXT_ANSWER" }] }, false);
+		assert.match(component.render(100).join("\n"), /HOST_TEXT_ANSWER/);
 	}
 	const shortcut = extension.shortcuts.get("alt+t");
 	assert.ok(shortcut);
