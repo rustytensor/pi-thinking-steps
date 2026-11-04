@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.18 - 2026-11-04
+
+### Fixed
+
+- Fixed the first-response crash on Pi 1.5 by wrapping its native renderer rather than copying `updateContent`. Pi now owns Markdown reuse, streaming state, transformer message IDs/timestamps, and error rendering. Pi 1.4 remains supported; user-message rendering is unchanged.
+- Hidden thinking with an empty label adds no panel or blank lines. Markdown detection works across separate host/package copies.
+
+### Tests
+
+- Added `npm run test:renderer-host` for real-host rendering checks. Validated Pi 1.4/1.5, 199 existing tests, and Pi 1.5 in tmux with a local streaming fixture and a registered Markdown transformer.
+
 ## 1.0.17 - 2026-10-02
 
 ### Added

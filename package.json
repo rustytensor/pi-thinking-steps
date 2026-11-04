@@ -1,6 +1,6 @@
 {
   "name": "pi-thinking-steps",
-  "version": "1.0.17",
+  "version": "1.0.18",
   "description": "Professional three-mode thinking-step rendering for Pi's TUI.",
   "license": "MIT",
   "type": "module",
@@ -47,7 +47,8 @@
     "test/inspection.test.ts",
     "test/summarizer-challenger.test.ts",
     "scripts/test-package.mjs",
-    "scripts/test-host.mjs"
+    "scripts/test-host.mjs",
+    "scripts/test-renderer-host.mjs"
   ],
   "pi": {
     "extensions": [
@@ -58,7 +59,8 @@
     "build": "tsc --noEmit",
     "test": "npm run build && node --import tsx test/thinking-steps.test.ts && node --import tsx test/summarizer-challenger.test.ts",
     "test:package": "node scripts/test-package.mjs",
-    "test:host": "node scripts/test-host.mjs"
+    "test:host": "node scripts/test-host.mjs",
+    "test:renderer-host": "node scripts/test-renderer-host.mjs"
   },
   "engines": {
     "node": ">=22.19.0"

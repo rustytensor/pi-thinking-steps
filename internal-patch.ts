@@ -2,7 +2,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { AssistantMessage, ThinkingContent } from "@earendil-works/pi-ai";
 import { AssistantMessageComponent as HostAssistantMessageComponent, getPackageDir, type MarkdownTransformer } from "@earendil-works/pi-coding-agent";
-import { Markdown, Spacer, Text, type Component, type MarkdownOptions, type MarkdownTheme } from "@earendil-works/pi-tui";
+import { Spacer, type Component, type MarkdownTheme } from "@earendil-works/pi-tui";
 import { decrementPatchRefCount, getPatchCleanup, getPatchInstallPromise, incrementPatchRefCount, resolveThinkingMessageScope, setPatchCleanup, setPatchInstallPromise } from "./state.js";
 import { ThinkingStepsComponent } from "./render.js";
 import type { ThinkingSourceBlock, ThinkingThemeLike } from "./types.js";
@@ -18,6 +18,7 @@ interface AssistantMessageComponentPrototype {
 	setHideThinkingBlock(hide: boolean): void;
 	setHiddenThinkingLabel(label: string): void;
 	contentContainer: {
+		children: Component[];
 		clear(): void;
 		addChild(component: Component): void;
 	};
@@ -74,20 +75,9 @@ function hasPatchableContentContainer(value: AssistantMessageComponentPrototype)
 	return Boolean(
 		value.contentContainer
 		&& typeof value.contentContainer.clear === "function"
-		&& typeof value.contentContainer.addChild === "function",
+		&& typeof value.contentContainer.addChild === "function"
+		&& Array.isArray(value.contentContainer.children),
 	);
-}
-
-function fallbackToOriginalUpdateContent(
-	instance: AssistantMessageComponentPrototype,
-	message: AssistantMessage,
-	originalUpdateContent: (message: AssistantMessage) => void,
-): void {
-	try {
-		originalUpdateContent.call(instance, message);
-	} catch (error) {
-		throw new Error("Thinking Steps patch failed: Pi internals are incompatible and fallback rendering also failed.", { cause: error });
-	}
 }
 
 export function resolvePiCodingAgentInternalModuleUrl(relativePath: string): string {
@@ -127,23 +117,10 @@ function collectThinkingBlocks(message: AssistantMessage): ThinkingSourceBlock[]
 	return blocks;
 }
 
-function hasVisibleTextContent(message: AssistantMessage): boolean {
-	return message.content.some((content) => content.type === "text" && content.text.trim().length > 0);
-}
-
-function hasVisibleThinkingContent(message: AssistantMessage): boolean {
-	return message.content.some((content) => content.type === "thinking" && hasVisibleThinking(content));
-}
-
 async function installPatch(providedTheme?: ThinkingThemeLike): Promise<() => void> {
-	const [{ theme: rawTheme }, { createMarkdownTransform }] = await Promise.all([
-		providedTheme === undefined
-			? importPiCodingAgentInternal<{ theme: unknown }>(PI_CODING_AGENT_INTERNAL_MODULES.theme)
-			: Promise.resolve({ theme: providedTheme }),
-		importPiCodingAgentInternal<{
-			createMarkdownTransform(messageType: "assistant", isStreaming: boolean, transformers: MarkdownTransformer[]): NonNullable<MarkdownOptions["transform"]>;
-		}>(PI_CODING_AGENT_INTERNAL_MODULES.markdownTransform),
-	]);
+	const { theme: rawTheme } = providedTheme === undefined
+		? await importPiCodingAgentInternal<{ theme: unknown }>(PI_CODING_AGENT_INTERNAL_MODULES.theme)
+		: { theme: providedTheme };
 
 	const AssistantMessageComponent = assertPatchableAssistantMessageComponent(HostAssistantMessageComponent);
 	const theme = assertThinkingStepsTheme(rawTheme);
@@ -282,58 +259,42 @@ async function installPatch(providedTheme?: ThinkingThemeLike): Promise<() => vo
 		}
 
 		try {
-			this.contentContainer.clear();
+			// Pi owns text, Markdown reuse, transformer context, and error rendering.
+			// Both the 1.4 boolean API and 1.5 getter API remain inside the host.
+			const textMessage: AssistantMessage = {
+				...message,
+				content: message.content.filter((content) => content.type !== "thinking"),
+			};
+			try {
+				originalUpdateContent.call(this, textMessage, isStreaming);
+			} finally {
+				this.lastMessage = message;
+			}
+			if (this.hideThinkingBlock && !this.hiddenThinkingLabel.trim()) return;
 
 			const thinkingBlocks = collectThinkingBlocks(message);
-			this.contentContainer.addChild(new Spacer(1));
-			if (thinkingBlocks.length === 0) {
-				this.contentContainer.addChild(new ThinkingStepsComponent(theme, message.timestamp, [], resolveThinkingMessageScope(message), this.outputPad, this.isStreaming));
-				if (hasVisibleTextContent(message)) this.contentContainer.addChild(new Spacer(1));
+			const firstThinkingIndex = thinkingBlocks[0]?.contentIndex ?? 0;
+			const precedingTextCount = message.content.slice(0, firstThinkingIndex)
+				.filter((content) => content.type === "text" && content.text.trim()).length;
+			const children = [...this.contentContainer.children];
+			// The host can load a different pi-tui copy. Markdown has a theme and
+			// setText; native Spacer and error Text children do not have both.
+			const textIndices = children.flatMap((child, index) =>
+				"theme" in child && "setText" in child && typeof child.setText === "function" ? [index] : []);
+			const expectedTextCount = textMessage.content.filter((content) => content.type === "text" && content.text.trim()).length;
+			if (textIndices.length !== expectedTextCount) {
+				throw new Error("Thinking Steps patch failed: Pi text component layout changed.");
 			}
-
-			let renderedThinking = false;
-			const hasVisibleTextAfterThinking = (() => {
-				const firstThinkingIndex = thinkingBlocks[0]?.contentIndex;
-				if (firstThinkingIndex === undefined) return false;
-				return message.content.slice(firstThinkingIndex + 1).some((content) => content.type === "text" && content.text.trim().length > 0);
-			})();
-
-			for (const content of message.content) {
-				if (content.type === "text" && content.text.trim()) {
-					this.contentContainer.addChild(new Markdown(content.text.trim(), this.outputPad, 0, this.markdownTheme, undefined, {
-						transform: createMarkdownTransform("assistant", this.isStreaming, this.markdownTransformers),
-					}));
-					continue;
-				}
-
-				if (content.type === "thinking" && thinkingBlocks.length > 0 && !renderedThinking) {
-					this.contentContainer.addChild(new ThinkingStepsComponent(theme, message.timestamp, thinkingBlocks, resolveThinkingMessageScope(message), this.outputPad, this.isStreaming));
-					renderedThinking = true;
-					if (hasVisibleTextAfterThinking) {
-						this.contentContainer.addChild(new Spacer(1));
-					}
-				}
-			}
-
-			const hasToolCalls = message.content.some((content) => content.type === "toolCall");
-			this.hasToolCalls = hasToolCalls;
-			if (message.stopReason === "length") {
-				this.contentContainer.addChild(new Spacer(1));
-				this.contentContainer.addChild(new Text(theme.fg("error", "Response was truncated before completion."), this.outputPad, 0));
-			} else if (!hasToolCalls) {
-				if (message.stopReason === "aborted") {
-					const abortMessage =
-						message.errorMessage && message.errorMessage !== "Request was aborted"
-							? message.errorMessage
-							: "Operation aborted";
-					this.contentContainer.addChild(new Spacer(1));
-					this.contentContainer.addChild(new Text(theme.fg("error", abortMessage), this.outputPad, 0));
-				} else if (message.stopReason === "error") {
-					const errorMessage = message.errorMessage || "Unknown error";
-					this.contentContainer.addChild(new Spacer(1));
-					this.contentContainer.addChild(new Text(theme.fg("error", `Error: ${errorMessage}`), this.outputPad, 0));
-				}
-			}
+			const nextTextIndex = textIndices[precedingTextCount];
+			const lastTextIndex = textIndices.at(-1);
+			const insertionIndex = nextTextIndex ?? (lastTextIndex === undefined ? 0 : lastTextIndex + 1);
+			const panel: Component[] = [];
+			if (textIndices.length === 0) panel.push(new Spacer(1));
+			panel.push(new ThinkingStepsComponent(theme, message.timestamp, thinkingBlocks, resolveThinkingMessageScope(message), this.outputPad, isStreaming));
+			if (nextTextIndex !== undefined) panel.push(new Spacer(1));
+			children.splice(insertionIndex, 0, ...panel);
+			this.contentContainer.clear();
+			for (const child of children) this.contentContainer.addChild(child);
 		} catch (error) {
 			fallbackToOriginalUpdateContent(this, message, "updateContent", error);
 		}
@@ -345,7 +306,8 @@ async function installPatch(providedTheme?: ThinkingThemeLike): Promise<() => vo
 			return;
 		}
 
-		this.hideThinkingBlock = false;
+		// Keep the three-mode panel visible unless hiding has an explicitly empty label.
+		this.hideThinkingBlock = hide && !this.hiddenThinkingLabel.trim();
 		if (!this.lastMessage) return;
 		try {
 			this.updateContent(this.lastMessage);
