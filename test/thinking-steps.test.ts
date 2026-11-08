@@ -917,9 +917,11 @@ describe("thinkingStepsExtension", () => {
 		assert.deepEqual(command.getArgumentCompletions?.("s"), [{ value: "summary", label: "summary" }, { value: "search", label: "search" }]);
 		assert.equal(command.getArgumentCompletions?.("z") ?? null, null);
 
-		assert.equal(pi.shortcuts.length, 1);
+		assert.equal(pi.shortcuts.length, 2);
 		assert.deepEqual(pi.shortcuts[0]?.key, Key.alt("t"));
 		assert.equal(pi.shortcuts[0]?.description, "Cycle thinking view (collapsed, summary, expanded)");
+		assert.deepEqual(pi.shortcuts[1]?.key, Key.altShift("t"));
+		assert.equal(pi.shortcuts[1]?.description, "Toggle token rate between this reply and the session average");
 		assert.equal(pi.handlers.get("session_start")?.length, 1);
 		assert.equal(pi.handlers.get("message_start")?.length, 1);
 		assert.equal(pi.handlers.get("message_update")?.length, 1);

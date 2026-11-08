@@ -15,13 +15,15 @@ export interface RateClock {
 	mono(): number;
 }
 
+export type RateScope = "now" | "session";
+
 export interface RateMeter {
 	begin(startedAtMs: number): void;
 	noteFirstOutput(): void;
 	noteUsage(usage: RateUsage): void;
 	finish(durationMs: number | undefined, usage: RateUsage | undefined): void;
 	reset(): void;
-	statusText(): string | undefined;
+	statusText(scope?: RateScope): string | undefined;
 }
 
 const FIRST_OUTPUT_EVENTS = new Set(["thinking_delta", "text_delta", "toolcall_start", "toolcall_delta"]);
@@ -72,15 +74,22 @@ export function tokensPerSecond(tokens: number, elapsedMs: number): number | und
 export function formatTokensPerSecond(rate: number): string {
 	if (!Number.isFinite(rate) || rate < 0) return "0";
 	if (rate < 10) return rate.toFixed(1);
-	if (rate < 1000) return String(Math.round(rate));
-	if (rate < 10_000) return `${(rate / 1000).toFixed(1)}k`;
-	if (rate < 1_000_000) return `${Math.round(rate / 1000)}k`;
-	if (rate < 10_000_000) return `${(rate / 1_000_000).toFixed(1)}M`;
-	return `${Math.round(rate / 1_000_000)}M`;
+	return Math.round(rate).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}
+
+export function formatRateLine(scope: RateScope, promptRate: number | undefined, generationRate: number | undefined, pending: { prompt: boolean; generation: boolean }): string | undefined {
+	const parts: string[] = [scope === "session" ? "session" : "now"];
+	if (promptRate !== undefined) parts.push(`in ${formatTokensPerSecond(promptRate)} tok/s`);
+	else if (pending.prompt) parts.push("in ...");
+	if (generationRate !== undefined) parts.push(`out ${formatTokensPerSecond(generationRate)} tok/s`);
+	else if (pending.generation) parts.push("out ...");
+	if (parts.length === 1) return scope === "session" ? "session · no rates yet" : undefined;
+	return parts.join(" · ");
 }
 
 export function createRateMeter(clock: RateClock = { now: () => Date.now(), mono: () => performance.now() }): RateMeter {
 	let sample: RateSample | undefined;
+	let sessionTotals = emptyTotals();
 
 	const elapsed = (current: RateSample, mono: number): number => {
 		return Math.max(0, (current.seenAtMs - current.startedAtMs) + (mono - current.seenMono));
@@ -120,22 +129,27 @@ export function createRateMeter(clock: RateClock = { now: () => Date.now(), mono
 			sample.finished = true;
 			if (durationMs !== undefined && Number.isFinite(durationMs)) sample.durationMs = durationMs;
 			if (usage) sample.usage = usage;
+			addMeasured(sessionTotals, sample.usage, windows(sample, clock.mono()));
 		},
 		reset(): void {
 			sample = undefined;
+			sessionTotals = emptyTotals();
 		},
-		statusText(): string | undefined {
+		statusText(scope: RateScope = "now"): string | undefined {
+			if (scope === "session") {
+				const totals = { ...sessionTotals };
+				if (sample && !sample.finished) addMeasured(totals, sample.usage, windows(sample, clock.mono()));
+				return formatRateLine("session", tokensPerSecond(totals.promptTokens, totals.promptMs), tokensPerSecond(totals.outputTokens, totals.generationMs), { prompt: false, generation: false });
+			}
 			if (!sample) return undefined;
 			const span = windows(sample, clock.mono());
 			const usage = sample.usage;
 			const promptRate = usage ? tokensPerSecond(promptTokenCount(usage), span.promptMs ?? Number.NaN) : undefined;
 			const generationRate = usage ? tokensPerSecond(generationTokenCount(usage), span.generationMs ?? Number.NaN) : undefined;
-			const parts: string[] = [];
-			if (promptRate !== undefined) parts.push(`prompt ${formatTokensPerSecond(promptRate)}/s`);
-			else if (!sample.finished) parts.push("prompt ...");
-			if (generationRate !== undefined) parts.push(`gen ${formatTokensPerSecond(generationRate)}/s`);
-			else if (!sample.finished && sample.firstTokenMono !== undefined) parts.push("gen ...");
-			return parts.length > 0 ? parts.join(" · ") : undefined;
+			return formatRateLine("now", promptRate, generationRate, {
+				prompt: !sample.finished && promptRate === undefined,
+				generation: !sample.finished && sample.firstTokenMono !== undefined && generationRate === undefined,
+			});
 		},
 	};
 }
@@ -152,4 +166,29 @@ function isFiniteCount(value: unknown): value is number {
 
 function hasReportedTokens(usage: RateUsage): boolean {
 	return usage.input > 0 || usage.output > 0 || usage.cacheRead > 0 || usage.cacheWrite > 0;
+}
+
+interface RateTotals {
+	promptTokens: number;
+	promptMs: number;
+	outputTokens: number;
+	generationMs: number;
+}
+
+function emptyTotals(): RateTotals {
+	return { promptTokens: 0, promptMs: 0, outputTokens: 0, generationMs: 0 };
+}
+
+function addMeasured(totals: RateTotals, usage: RateUsage | undefined, span: { promptMs?: number; generationMs?: number }): void {
+	if (!usage) return;
+	const promptTokens = promptTokenCount(usage);
+	const outputTokens = generationTokenCount(usage);
+	if (span.promptMs !== undefined && span.promptMs >= 1 && promptTokens > 0) {
+		totals.promptTokens += promptTokens;
+		totals.promptMs += span.promptMs;
+	}
+	if (span.generationMs !== undefined && span.generationMs >= 1 && outputTokens > 0) {
+		totals.outputTokens += outputTokens;
+		totals.generationMs += span.generationMs;
+	}
 }

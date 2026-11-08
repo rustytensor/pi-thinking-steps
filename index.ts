@@ -13,7 +13,7 @@ import { openThinkingExports } from "./archives.js";
 import { thinkingDiagnostics } from "./diagnostics.js";
 import { buildThinkingExport, saveThinkingExport } from "./export.js";
 import { renderThinkingExportFiles } from "./render.js";
-import { createRateMeter, isFirstOutputEvent, readDurationMs, readRateUsage, readStartedAtMs } from "./rate.js";
+import { createRateMeter, isFirstOutputEvent, readDurationMs, readRateUsage, readStartedAtMs, type RateScope } from "./rate.js";
 
 async function configureThinkingAutosave(pi: ExtensionAPI, ctx: ExtensionContext, action: "status" | "off" | "on", settings?: ThinkingAutosaveSettings): Promise<boolean> {
 	const manager = ctx.sessionManager;
@@ -296,11 +296,12 @@ export default function thinkingStepsExtension(pi: ExtensionAPI): void {
 	pi.registerEntryRenderer("thinking-steps.export", (entry, _options, theme) => renderThinkingExportFiles(entry.data, theme));
 	let sessionScopeKey = getCurrentThinkingScopeKey();
 	const rateMeter = createRateMeter();
+	let rateScope: RateScope = "now";
 	let rateStatus: string | undefined;
 	let ratePublishedAt = 0;
 	const showRate = (ctx: ExtensionContext | undefined, force = false): void => {
 		if (!ctx?.hasUI) return;
-		const plain = rateMeter.statusText();
+		const plain = rateMeter.statusText(rateScope);
 		if (plain === rateStatus) return;
 		const now = performance.now();
 		if (!force && plain !== undefined && now - ratePublishedAt < 250) return;
@@ -416,6 +417,16 @@ export default function thinkingStepsExtension(pi: ExtensionAPI): void {
 			}
 			const nextMode = cycleMode(getThinkingStepsMode(ctx.cwd));
 			applyMode(pi, ctx, nextMode, { announceScope: "session" });
+		},
+	});
+
+	pi.registerShortcut(Key.altShift("t"), {
+		description: "Toggle token rate between this reply and the session average",
+		handler: async (ctx) => {
+			rateScope = rateScope === "now" ? "session" : "now";
+			rateStatus = undefined;
+			showRate(ctx, true);
+			notifyUser(ctx, rateScope === "now" ? "Token rate: this reply" : "Token rate: session average", "info");
 		},
 	});
 

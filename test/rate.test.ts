@@ -31,10 +31,10 @@ describe("token rates", () => {
 		assert.equal(formatTokensPerSecond(4.2), "4.2");
 		assert.equal(formatTokensPerSecond(40), "40");
 		assert.equal(formatTokensPerSecond(999), "999");
-		assert.equal(formatTokensPerSecond(1000), "1.0k");
-		assert.equal(formatTokensPerSecond(2000), "2.0k");
-		assert.equal(formatTokensPerSecond(10_000), "10k");
-		assert.equal(formatTokensPerSecond(1_500_000), "1.5M");
+		assert.equal(formatTokensPerSecond(1000), "1,000");
+		assert.equal(formatTokensPerSecond(2000), "2,000");
+		assert.equal(formatTokensPerSecond(10_000), "10,000");
+		assert.equal(formatTokensPerSecond(1_500_000), "1,500,000");
 	});
 
 	it("shows prompt processing and generation rates without counting cache reads", () => {
@@ -43,16 +43,17 @@ describe("token rates", () => {
 		assert.equal(meter.statusText(), undefined);
 
 		meter.begin(10_000);
-		assert.equal(meter.statusText(), "prompt ...");
+		assert.equal(meter.statusText(), "now · in ...");
+		assert.equal(meter.statusText("session"), "session · no rates yet");
 
 		clock.set(10_000, 500);
 		meter.noteFirstOutput();
 		meter.noteUsage(cachedPrompt);
-		assert.equal(meter.statusText(), "prompt 2.0k/s · gen ...");
+		assert.equal(meter.statusText(), "now · in 2,000 tok/s · out ...");
 
 		clock.set(10_000, 2100);
 		meter.finish(2000, finishedPrompt);
-		assert.equal(meter.statusText(), "prompt 2.0k/s · gen 50/s");
+		assert.equal(meter.statusText(), "now · in 2,000 tok/s · out 50 tok/s");
 	});
 
 	it("counts cache writes as processed prompt tokens and omits a full cache hit", () => {
@@ -62,7 +63,7 @@ describe("token rates", () => {
 		clock.set(1_000, 100);
 		meter.noteFirstOutput();
 		meter.noteUsage({ input: 10, output: 0, cacheRead: 0, cacheWrite: 90 });
-		assert.equal(meter.statusText(), "prompt 1.0k/s · gen ...");
+		assert.equal(meter.statusText(), "now · in 1,000 tok/s · out ...");
 
 		const cachedClock = clockAt(1_000, 0);
 		const cached = createRateMeter(cachedClock);
@@ -71,7 +72,7 @@ describe("token rates", () => {
 		cached.noteFirstOutput();
 		cachedClock.set(1_000, 1100);
 		cached.finish(1100, { input: 0, output: 10, cacheRead: 10_000, cacheWrite: 0 });
-		assert.equal(cached.statusText(), "gen 10/s");
+		assert.equal(cached.statusText(), "now · out 10 tok/s");
 	});
 
 	it("does not invent a split when no generated token was observed", () => {
@@ -83,5 +84,25 @@ describe("token rates", () => {
 		assert.equal(meter.statusText(), undefined);
 		meter.reset();
 		assert.equal(meter.statusText(), undefined);
+	});
+
+	it("averages a session by total tokens over total time", () => {
+		const clock = clockAt(10_000, 100);
+		const meter = createRateMeter(clock);
+		meter.begin(10_000);
+		clock.set(10_000, 500);
+		meter.noteFirstOutput();
+		clock.set(10_000, 2100);
+		meter.finish(2000, finishedPrompt);
+
+		clock.set(20_000, 3000);
+		meter.begin(20_000);
+		clock.set(20_000, 3200);
+		meter.noteFirstOutput();
+		clock.set(20_000, 4000);
+		meter.finish(1000, { input: 200, output: 40, cacheRead: 0, cacheWrite: 0 });
+
+		assert.equal(meter.statusText(), "now · in 1,000 tok/s · out 50 tok/s");
+		assert.equal(meter.statusText("session"), "session · in 1,667 tok/s · out 50 tok/s");
 	});
 });

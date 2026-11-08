@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.2.0 - 2026-11-08
+
+### Added
+
+- Footer rates now read `now · in 12,000 tok/s · out 98 tok/s` instead of `prompt 12k/s · gen 98/s`. `in` is prompt tokens per second until the first generated token. `out` is generated tokens per second after that.
+- `Alt+Shift+T` switches between this reply and the session average. The session figure is all measured tokens divided by all measured time.
+
 ## 1.1.0 - 2026-11-08
 
 ### Added

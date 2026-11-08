@@ -9,7 +9,7 @@
   Turn raw provider reasoning into a clean, structured TUI view without changing what it means.
 </p>
 <p align="center">
-  <a href="https://github.com/rustytensor/pi-thinking-steps/releases/tag/v1.1.0"><img alt="release" src="https://img.shields.io/badge/release-v1.1.0-4f46e5" /></a>
+  <a href="https://github.com/rustytensor/pi-thinking-steps/releases/tag/v1.2.0"><img alt="release" src="https://img.shields.io/badge/release-v1.2.0-4f46e5" /></a>
   <a href="https://www.npmjs.com/package/pi-thinking-steps"><img alt="npm version" src="https://img.shields.io/npm/v/pi-thinking-steps" /></a>
   <a href="./LICENSE"><img alt="license" src="https://img.shields.io/badge/license-MIT-16a34a" /></a>
   <img alt="typescript" src="https://img.shields.io/badge/TypeScript-strict-3178c6" />
@@ -47,7 +47,7 @@ The goal is simple: **preserve meaning, improve readability, and stay native to 
 - **In-Pi review browser** — navigate recorded prompts, responses, and available thinking without another model turn
 - **Opt-in automatic snapshots** — session-specific consent, content controls, and bounded retention; off by default
 - **Terminal-first rendering** — width-aware, ANSI-safe, and live-update friendly
-- **Footer token rates** — prompt-processing and generation tokens per second for the latest response, on Pi's footer status line
+- **Footer token rates** — `now · in 12,000 tok/s · out 98 tok/s` for this reply. `Alt+Shift+T` switches to the session average, `session · in 8,400 tok/s · out 71 tok/s`
 - **Faithful parsing** — deterministic step derivation and restrained summarization
 - **Markdown-aware output** — headings, bullets, ordered lists, code spans, and emphasis render cleanly
 - **Scoped persistence** — session, project, and global defaults with predictable restore precedence
@@ -80,6 +80,7 @@ Use it when you want the whole text, but formatted for a terminal instead of dum
 | Action | Control |
 |---|---|
 | Cycle thinking view | `Alt+T` |
+| Toggle token rate: this reply or session average | `Alt+Shift+T` |
 | Choose a mode interactively | `/thinking-steps` |
 | Set session mode | `/thinking-steps collapsed` / `summary` / `expanded` |
 | Save a project default | `/thinking-steps project <mode>` |
@@ -91,6 +92,16 @@ Use it when you want the whole text, but formatted for a terminal instead of dum
 | Browse prompts, responses, and thinking | `/thinking-steps review` (current branch) / `review all` |
 | Inspect or disable autosaving | `/thinking-steps autosave status` / `autosave off` |
 | Enable autosaving with confirmation | `/thinking-steps autosave on` (JSON, current branch, keep 10, thinking only) |
+
+---
+
+## Token rates
+
+The footer shows speed for the latest reply, in plain counts rather than `12k/s`.
+
+- `now · in 12,000 tok/s · out 98 tok/s` is this reply. `in` is prompt tokens per second until the first generated token. `out` is generated tokens per second after that, including reasoning.
+- `Alt+Shift+T` switches to the session average: `session · in 8,400 tok/s · out 71 tok/s`. That is all measured tokens divided by all measured time in this session, not a simple mean of each reply.
+- Cached prompt tokens are not counted as processing.
 
 ---
 
