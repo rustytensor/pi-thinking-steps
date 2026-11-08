@@ -1,17 +1,17 @@
 {
   "name": "pi-thinking-steps",
-  "version": "1.0.18",
+  "version": "1.1.0",
   "description": "Professional three-mode thinking-step rendering for Pi's TUI.",
   "license": "MIT",
   "type": "module",
   "main": "index.ts",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/crustyhacker/pi-thinking-steps.git"
+    "url": "git+https://github.com/rustytensor/pi-thinking-steps.git"
   },
-  "homepage": "https://github.com/crustyhacker/pi-thinking-steps#readme",
+  "homepage": "https://github.com/rustytensor/pi-thinking-steps#readme",
   "bugs": {
-    "url": "https://github.com/crustyhacker/pi-thinking-steps/issues"
+    "url": "https://github.com/rustytensor/pi-thinking-steps/issues"
   },
   "keywords": [
     "pi",
@@ -38,10 +38,12 @@
     "parse.ts",
     "persistence.ts",
     "render.ts",
+    "rate.ts",
     "state.ts",
     "types.ts",
     "tsconfig.json",
     "test/thinking-steps.test.ts",
+    "test/rate.test.ts",
     "test/export.test.ts",
     "test/review-autosave.test.ts",
     "test/inspection.test.ts",

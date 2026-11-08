@@ -1,6 +1,7 @@
 import "./export.test.js";
 import "./review-autosave.test.js";
 import "./inspection.test.js";
+import "./rate.test.js";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";

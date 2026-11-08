@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.1.0 - 2026-11-08
+
+### Added
+
+- The footer status line shows prompt-processing and generation tokens per second for the latest assistant response. Prompt rate counts input and cache-write tokens until the first generated token. Cache reads are excluded. Generation rate counts output tokens, including reasoning, after that first token.
+
+### Tests
+
+- Added rate calculations pinned to precomputed token and time counts.
+
 ## 1.0.18 - 2026-11-04
 
 ### Fixed

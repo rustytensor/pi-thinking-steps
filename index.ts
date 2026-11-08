@@ -13,6 +13,7 @@ import { openThinkingExports } from "./archives.js";
 import { thinkingDiagnostics } from "./diagnostics.js";
 import { buildThinkingExport, saveThinkingExport } from "./export.js";
 import { renderThinkingExportFiles } from "./render.js";
+import { createRateMeter, isFirstOutputEvent, readDurationMs, readRateUsage, readStartedAtMs } from "./rate.js";
 
 async function configureThinkingAutosave(pi: ExtensionAPI, ctx: ExtensionContext, action: "status" | "off" | "on", settings?: ThinkingAutosaveSettings): Promise<boolean> {
 	const manager = ctx.sessionManager;
@@ -56,8 +57,19 @@ const DEFAULT_HIDDEN_LABEL = "Thinking...";
 const MODE_OPTIONS: ThinkingStepsMode[] = ["collapsed", "summary", "expanded"];
 const SCOPE_OPTIONS: PersistedThinkingStepsPreferenceScope[] = ["project", "global"];
 
+const RATE_STATUS_KEY = "thinking-steps.rate";
+
 function modeStatusText(ctx: ExtensionContext, mode: ThinkingStepsMode): string {
 	return `${ctx.ui.theme.fg("muted", "thinking:")} ${ctx.ui.theme.fg("accent", mode)}`;
+}
+
+function paintRateStatus(ctx: ExtensionContext, text: string): string {
+	const theme = ctx.ui.theme;
+	return text.split(" \u00b7 ").map((part) => {
+		const space = part.indexOf(" ");
+		if (space <= 0) return part;
+		return `${theme.fg("muted", part.slice(0, space))} ${theme.fg("accent", part.slice(space + 1))}`;
+	}).join(` ${theme.fg("muted", "\u00b7")} `);
 }
 
 function modeChangeMessage(mode: ThinkingStepsMode, scope: ThinkingStepsCommandScope): string {
@@ -283,6 +295,19 @@ async function exportThinkingSteps(pi: ExtensionAPI, ctx: ExtensionContext, form
 export default function thinkingStepsExtension(pi: ExtensionAPI): void {
 	pi.registerEntryRenderer("thinking-steps.export", (entry, _options, theme) => renderThinkingExportFiles(entry.data, theme));
 	let sessionScopeKey = getCurrentThinkingScopeKey();
+	const rateMeter = createRateMeter();
+	let rateStatus: string | undefined;
+	let ratePublishedAt = 0;
+	const showRate = (ctx: ExtensionContext | undefined, force = false): void => {
+		if (!ctx?.hasUI) return;
+		const plain = rateMeter.statusText();
+		if (plain === rateStatus) return;
+		const now = performance.now();
+		if (!force && plain !== undefined && now - ratePublishedAt < 250) return;
+		rateStatus = plain;
+		ratePublishedAt = now;
+		ctx.ui.setStatus(RATE_STATUS_KEY, plain === undefined ? undefined : paintRateStatus(ctx, plain));
+	};
 	const degradedSessionScopes = new Set<string>();
 	const patchDiagnostics = new Map<string, ThinkingPatchDiagnostic>();
 	let autosaveEpoch = 0;
@@ -396,6 +421,8 @@ export default function thinkingStepsExtension(pi: ExtensionAPI): void {
 
 	pi.on("session_start", async (_event, ctx) => {
 		autosaveEpoch += 1;
+		rateMeter.reset();
+		rateStatus = undefined;
 		const activeScopeKey = setSessionScopeKey(ctx.cwd);
 		clearActiveThinkingState(undefined, activeScopeKey);
 		patchDiagnostics.set(activeScopeKey, { status: ctx.mode === "tui" ? "not-started" : "native" });
@@ -413,11 +440,12 @@ export default function thinkingStepsExtension(pi: ExtensionAPI): void {
 			}
 		}
 
+		if (ctx.hasUI) ctx.ui.setStatus(RATE_STATUS_KEY, undefined);
 		const restoredMode = await restoreMode(ctx);
 		applyMode(pi, ctx, restoredMode, { persistSession: false });
 	});
 
-	pi.on("message_start", async (event) => {
+	pi.on("message_start", async (event, ctx) => {
 		if (event.message.role === "assistant") {
 			recordThinkingMessageScope(event.message, sessionScopeKey);
 			const ownerScopeKey = resolveThinkingMessageScope(event.message, sessionScopeKey);
@@ -425,14 +453,22 @@ export default function thinkingStepsExtension(pi: ExtensionAPI): void {
 				? (event.message as { timestamp: number }).timestamp
 				: undefined;
 			clearActiveThinkingState(timestamp, ownerScopeKey);
+			rateMeter.begin(readStartedAtMs(event.message, Date.now()));
+			const usage = readRateUsage(event.message);
+			if (usage) rateMeter.noteUsage(usage);
+			showRate(ctx, true);
 		}
 	});
 
-	pi.on("message_update", async (event) => {
+	pi.on("message_update", async (event, ctx) => {
 		if (event.message.role !== "assistant") return;
 		recordThinkingMessageScope(event.message, sessionScopeKey);
 		const ownerScopeKey = resolveThinkingMessageScope(event.message, sessionScopeKey);
 		const assistantEvent = event.assistantMessageEvent;
+		if (isFirstOutputEvent(assistantEvent.type)) rateMeter.noteFirstOutput();
+		const usage = readRateUsage(event.message);
+		if (usage) rateMeter.noteUsage(usage);
+		showRate(ctx);
 		if (assistantEvent.type === "thinking_start" || assistantEvent.type === "thinking_delta") {
 			setActiveThinkingState({
 				active: true,
@@ -455,7 +491,7 @@ export default function thinkingStepsExtension(pi: ExtensionAPI): void {
 		}
 	});
 
-	pi.on("message_end", async (event) => {
+	pi.on("message_end", async (event, ctx) => {
 		if (event.message.role === "assistant") {
 			recordThinkingMessageScope(event.message, sessionScopeKey);
 			const ownerScopeKey = resolveThinkingMessageScope(event.message, sessionScopeKey);
@@ -463,6 +499,8 @@ export default function thinkingStepsExtension(pi: ExtensionAPI): void {
 				? (event.message as { timestamp: number }).timestamp
 				: undefined;
 			clearActiveThinkingState(timestamp, ownerScopeKey);
+			rateMeter.finish(readDurationMs(event.message), readRateUsage(event.message));
+			showRate(ctx, true);
 		}
 	});
 
@@ -483,7 +521,10 @@ export default function thinkingStepsExtension(pi: ExtensionAPI): void {
 		clearThinkingMessageOwnership(activeScopeKey);
 		markSessionDegraded(activeScopeKey, false);
 		patchDiagnostics.set(activeScopeKey, { status: "stopped" });
+		rateMeter.reset();
+		rateStatus = undefined;
 		if (ctx.hasUI) {
+			ctx.ui.setStatus(RATE_STATUS_KEY, undefined);
 			ctx.ui.setStatus("thinking-steps", undefined);
 		}
 

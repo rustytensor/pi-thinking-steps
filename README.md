@@ -9,7 +9,7 @@
   Turn raw provider reasoning into a clean, structured TUI view without changing what it means.
 </p>
 <p align="center">
-  <a href="https://github.com/crustyhacker/pi-thinking-steps/releases/tag/v1.0.18"><img alt="release" src="https://img.shields.io/badge/release-v1.0.18-4f46e5" /></a>
+  <a href="https://github.com/rustytensor/pi-thinking-steps/releases/tag/v1.1.0"><img alt="release" src="https://img.shields.io/badge/release-v1.1.0-4f46e5" /></a>
   <a href="https://www.npmjs.com/package/pi-thinking-steps"><img alt="npm version" src="https://img.shields.io/npm/v/pi-thinking-steps" /></a>
   <a href="./LICENSE"><img alt="license" src="https://img.shields.io/badge/license-MIT-16a34a" /></a>
   <img alt="typescript" src="https://img.shields.io/badge/TypeScript-strict-3178c6" />
@@ -47,6 +47,7 @@ The goal is simple: **preserve meaning, improve readability, and stay native to 
 - **In-Pi review browser** — navigate recorded prompts, responses, and available thinking without another model turn
 - **Opt-in automatic snapshots** — session-specific consent, content controls, and bounded retention; off by default
 - **Terminal-first rendering** — width-aware, ANSI-safe, and live-update friendly
+- **Footer token rates** — prompt-processing and generation tokens per second for the latest response, on Pi's footer status line
 - **Faithful parsing** — deterministic step derivation and restrained summarization
 - **Markdown-aware output** — headings, bullets, ordered lists, code spans, and emphasis render cleanly
 - **Scoped persistence** — session, project, and global defaults with predictable restore precedence
@@ -308,7 +309,7 @@ pi install npm:pi-thinking-steps
 
 Restart Pi, then use `Alt+T` to cycle views or `/thinking-steps` to choose one. After a response finishes, run `/thinking-steps export both` to save a session-linked review. Exports include all recorded branches and may contain sensitive conversation data; see [Manual session exports](#manual-session-exports).
 
-Find the package on [npm](https://www.npmjs.com/package/pi-thinking-steps) and release notes on [GitHub](https://github.com/crustyhacker/pi-thinking-steps/releases).
+Find the package on [npm](https://www.npmjs.com/package/pi-thinking-steps) and release notes on [GitHub](https://github.com/rustytensor/pi-thinking-steps/releases).
 
 ### Try a local checkout
 
