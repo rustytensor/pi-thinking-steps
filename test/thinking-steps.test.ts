@@ -100,11 +100,11 @@ interface FakeExtensionAPI {
 	handlers: Map<string, FakeEventHandler[]>;
 	entryRenderers: Map<string, unknown>;
 	registerEntryRenderer(customType: string, renderer: unknown): void;
-	appendedEntries: Array<{ type: "custom"; customType: string; data: { mode: string } }>;
+	appendedEntries: Array<{ type: "custom"; customType: string; data: { mode?: string; schemaVersion?: number; text?: string } }>;
 	registerCommand(name: string, command: RegisteredCommand): void;
 	registerShortcut(key: unknown, shortcut: Omit<RegisteredShortcut, "key">): void;
 	on(event: string, handler: FakeEventHandler): void;
-	appendEntry(customType: string, data: { mode: string }): void;
+	appendEntry(customType: string, data: { mode?: string; schemaVersion?: number; text?: string }): void;
 }
 
 function createFakeUI(): FakeUI {
@@ -162,7 +162,7 @@ function createFakeExtensionAPI(): FakeExtensionAPI {
 	const shortcuts: RegisteredShortcut[] = [];
 	const handlers = new Map<string, FakeEventHandler[]>();
 	const entryRenderers = new Map<string, unknown>();
-	const appendedEntries: Array<{ type: "custom"; customType: string; data: { mode: string } }> = [];
+	const appendedEntries: Array<{ type: "custom"; customType: string; data: { mode?: string; schemaVersion?: number; text?: string } }> = [];
 
 	return {
 		commands,
@@ -184,7 +184,7 @@ function createFakeExtensionAPI(): FakeExtensionAPI {
 			registered.push(handler);
 			handlers.set(event, registered);
 		},
-		appendEntry(customType: string, data: { mode: string }) {
+		appendEntry(customType: string, data: { mode?: string; schemaVersion?: number; text?: string }) {
 			appendedEntries.push({ type: "custom", customType, data });
 		},
 	};
@@ -921,11 +921,12 @@ describe("thinkingStepsExtension", () => {
 		assert.deepEqual(pi.shortcuts[0]?.key, Key.alt("t"));
 		assert.equal(pi.shortcuts[0]?.description, "Cycle thinking view (collapsed, summary, expanded)");
 		assert.deepEqual(pi.shortcuts[1]?.key, Key.altShift("t"));
-		assert.equal(pi.shortcuts[1]?.description, "Toggle token rate between this reply and the session average");
+		assert.equal(pi.shortcuts[1]?.description, "Toggle token rate between the last reply and the session average");
 		assert.equal(pi.handlers.get("session_start")?.length, 1);
 		assert.equal(pi.handlers.get("message_start")?.length, 1);
 		assert.equal(pi.handlers.get("message_update")?.length, 1);
 		assert.equal(pi.handlers.get("message_end")?.length, 1);
+		assert.equal(pi.handlers.get("turn_end")?.length, 1);
 		assert.equal(pi.handlers.get("agent_end")?.length, 1);
 		assert.equal(pi.handlers.get("session_shutdown")?.length, 1);
 	});
@@ -1141,6 +1142,55 @@ describe("thinkingStepsExtension", () => {
 			if (getPatchRefCount() > 0) {
 				await sessionShutdown({}, ctx);
 			}
+			resetExtensionState();
+		}
+	});
+
+	it("keeps the last reply rate and records one line under the reply", async () => {
+		resetExtensionState();
+		const { pi, ctx } = createExtensionHarness();
+		const sessionStart = getSingleHandler(pi, "session_start");
+		const messageStart = getSingleHandler(pi, "message_start");
+		const messageUpdate = getSingleHandler(pi, "message_update");
+		const messageEnd = getSingleHandler(pi, "message_end");
+		const turnEnd = getSingleHandler(pi, "turn_end");
+		const sessionShutdown = getSingleHandler(pi, "session_shutdown");
+		const started = Date.now() - 400;
+		const message = {
+			role: "assistant" as const,
+			timestamp: started,
+			durationMs: 5000,
+			usage: { input: 800, output: 80, cacheRead: 0, cacheWrite: 0 },
+		};
+
+		try {
+			await sessionStart({}, ctx);
+			await messageStart({ message }, ctx);
+			await messageUpdate({ message, assistantMessageEvent: { type: "thinking_delta", contentIndex: 0 } }, ctx);
+			await messageEnd({ message }, ctx);
+			await turnEnd({ message, toolResults: [] }, ctx);
+
+			const rateEntries = pi.appendedEntries.filter((entry) => entry.customType === "thinking-steps.rate-line");
+			assert.equal(rateEntries.length, 1);
+			assert.match(rateEntries[0]?.data.text ?? "", /^in [\d,.]+ tok\/s · out [\d,.]+ tok\/s$/);
+			const latest = [...ctx.ui.statuses].reverse().find((status) => status.key === "thinking-steps.rate");
+			assert.match(latest?.value ?? "", /^last · in /);
+			const kept = latest?.value;
+
+			await messageStart({ message: { role: "assistant", timestamp: Date.now() } }, ctx);
+			const afterStart = [...ctx.ui.statuses].reverse().find((status) => status.key === "thinking-steps.rate");
+			assert.equal(afterStart?.value, kept);
+
+			await messageEnd({ message: { role: "assistant", timestamp: Date.now(), durationMs: 1000, usage: { input: 10, output: 10, cacheRead: 0, cacheWrite: 0 } } }, ctx);
+			await turnEnd({ message: { role: "assistant" } }, ctx);
+			assert.equal(pi.appendedEntries.filter((entry) => entry.customType === "thinking-steps.rate-line").length, 1);
+
+			const renderer = pi.entryRenderers.get("thinking-steps.rate-line") as ((entry: { data: unknown }, options: unknown, theme: ThinkingThemeLike) => unknown) | undefined;
+			assert.ok(renderer);
+			assert.ok(renderer({ data: rateEntries[0]?.data }, {}, ctx.ui.theme));
+			assert.equal(renderer({ data: { schemaVersion: 1, text: "not a rate" } }, {}, ctx.ui.theme), undefined);
+		} finally {
+			if (getPatchRefCount() > 0) await sessionShutdown({}, ctx);
 			resetExtensionState();
 		}
 	});

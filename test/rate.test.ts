@@ -43,17 +43,19 @@ describe("token rates", () => {
 		assert.equal(meter.statusText(), undefined);
 
 		meter.begin(10_000);
-		assert.equal(meter.statusText(), "now · in ...");
+		assert.equal(meter.statusText(), undefined);
 		assert.equal(meter.statusText("session"), "session · no rates yet");
 
 		clock.set(10_000, 500);
 		meter.noteFirstOutput();
 		meter.noteUsage(cachedPrompt);
-		assert.equal(meter.statusText(), "now · in 2,000 tok/s · out ...");
+		assert.equal(meter.statusText(), "now · in 2,000 tok/s");
 
 		clock.set(10_000, 2100);
 		meter.finish(2000, finishedPrompt);
-		assert.equal(meter.statusText(), "now · in 2,000 tok/s · out 50 tok/s");
+		assert.equal(meter.statusText(), "last · in 2,000 tok/s · out 50 tok/s");
+		assert.equal(meter.takeTranscriptLine(), "in 2,000 tok/s · out 50 tok/s");
+		assert.equal(meter.takeTranscriptLine(), undefined);
 	});
 
 	it("counts cache writes as processed prompt tokens and omits a full cache hit", () => {
@@ -63,7 +65,7 @@ describe("token rates", () => {
 		clock.set(1_000, 100);
 		meter.noteFirstOutput();
 		meter.noteUsage({ input: 10, output: 0, cacheRead: 0, cacheWrite: 90 });
-		assert.equal(meter.statusText(), "now · in 1,000 tok/s · out ...");
+		assert.equal(meter.statusText(), "now · in 1,000 tok/s");
 
 		const cachedClock = clockAt(1_000, 0);
 		const cached = createRateMeter(cachedClock);
@@ -72,7 +74,7 @@ describe("token rates", () => {
 		cached.noteFirstOutput();
 		cachedClock.set(1_000, 1100);
 		cached.finish(1100, { input: 0, output: 10, cacheRead: 10_000, cacheWrite: 0 });
-		assert.equal(cached.statusText(), "now · out 10 tok/s");
+		assert.equal(cached.statusText(), "last · out 10 tok/s");
 	});
 
 	it("does not invent a split when no generated token was observed", () => {
@@ -102,7 +104,23 @@ describe("token rates", () => {
 		clock.set(20_000, 4000);
 		meter.finish(1000, { input: 200, output: 40, cacheRead: 0, cacheWrite: 0 });
 
-		assert.equal(meter.statusText(), "now · in 1,000 tok/s · out 50 tok/s");
+		assert.equal(meter.statusText(), "last · in 1,000 tok/s · out 50 tok/s");
 		assert.equal(meter.statusText("session"), "session · in 1,667 tok/s · out 50 tok/s");
+	});
+
+	it("keeps the last finished reply when the next reply has no numbers yet", () => {
+		const clock = clockAt(10_000, 100);
+		const meter = createRateMeter(clock);
+		meter.begin(10_000);
+		clock.set(10_000, 500);
+		meter.noteFirstOutput();
+		clock.set(10_000, 2100);
+		meter.finish(2000, finishedPrompt);
+
+		clock.set(20_000, 3000);
+		meter.begin(20_000);
+		assert.equal(meter.statusText(), "last · in 2,000 tok/s · out 50 tok/s");
+		meter.noteUsage(cachedPrompt);
+		assert.equal(meter.statusText(), "last · in 2,000 tok/s · out 50 tok/s");
 	});
 });

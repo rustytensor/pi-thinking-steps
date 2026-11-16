@@ -12,7 +12,7 @@ import { openThinkingSearch, openThinkingComparison } from "./inspection.js";
 import { openThinkingExports } from "./archives.js";
 import { thinkingDiagnostics } from "./diagnostics.js";
 import { buildThinkingExport, saveThinkingExport } from "./export.js";
-import { renderThinkingExportFiles } from "./render.js";
+import { renderRateLine, renderThinkingExportFiles } from "./render.js";
 import { createRateMeter, isFirstOutputEvent, readDurationMs, readRateUsage, readStartedAtMs, type RateScope } from "./rate.js";
 
 async function configureThinkingAutosave(pi: ExtensionAPI, ctx: ExtensionContext, action: "status" | "off" | "on", settings?: ThinkingAutosaveSettings): Promise<boolean> {
@@ -58,6 +58,7 @@ const MODE_OPTIONS: ThinkingStepsMode[] = ["collapsed", "summary", "expanded"];
 const SCOPE_OPTIONS: PersistedThinkingStepsPreferenceScope[] = ["project", "global"];
 
 const RATE_STATUS_KEY = "thinking-steps.rate";
+const RATE_ENTRY = "thinking-steps.rate-line";
 
 function modeStatusText(ctx: ExtensionContext, mode: ThinkingStepsMode): string {
 	return `${ctx.ui.theme.fg("muted", "thinking:")} ${ctx.ui.theme.fg("accent", mode)}`;
@@ -294,9 +295,10 @@ async function exportThinkingSteps(pi: ExtensionAPI, ctx: ExtensionContext, form
 
 export default function thinkingStepsExtension(pi: ExtensionAPI): void {
 	pi.registerEntryRenderer("thinking-steps.export", (entry, _options, theme) => renderThinkingExportFiles(entry.data, theme));
+	pi.registerEntryRenderer(RATE_ENTRY, (entry, _options, theme) => renderRateLine(entry.data, theme));
 	let sessionScopeKey = getCurrentThinkingScopeKey();
 	const rateMeter = createRateMeter();
-	let rateScope: RateScope = "now";
+	let rateScope: RateScope = "last";
 	let rateStatus: string | undefined;
 	let ratePublishedAt = 0;
 	const showRate = (ctx: ExtensionContext | undefined, force = false): void => {
@@ -421,12 +423,12 @@ export default function thinkingStepsExtension(pi: ExtensionAPI): void {
 	});
 
 	pi.registerShortcut(Key.altShift("t"), {
-		description: "Toggle token rate between this reply and the session average",
+		description: "Toggle token rate between the last reply and the session average",
 		handler: async (ctx) => {
-			rateScope = rateScope === "now" ? "session" : "now";
+			rateScope = rateScope === "last" ? "session" : "last";
 			rateStatus = undefined;
 			showRate(ctx, true);
-			notifyUser(ctx, rateScope === "now" ? "Token rate: this reply" : "Token rate: session average", "info");
+			notifyUser(ctx, rateScope === "last" ? "Token rate: last reply" : "Token rate: session average", "info");
 		},
 	});
 
@@ -512,6 +514,19 @@ export default function thinkingStepsExtension(pi: ExtensionAPI): void {
 			clearActiveThinkingState(timestamp, ownerScopeKey);
 			rateMeter.finish(readDurationMs(event.message), readRateUsage(event.message));
 			showRate(ctx, true);
+		}
+	});
+
+	pi.on("turn_end", async (event, ctx) => {
+		if (event.message.role !== "assistant") return;
+		rateMeter.finish(readDurationMs(event.message), readRateUsage(event.message));
+		showRate(ctx, true);
+		const line = rateMeter.takeTranscriptLine();
+		if (!line) return;
+		try {
+			pi.appendEntry(RATE_ENTRY, { schemaVersion: 1, text: line });
+		} catch (error) {
+			notifyUser(ctx, `Token rate was not saved in the session: ${error instanceof Error ? error.message : String(error)}`, "warning");
 		}
 	});
 

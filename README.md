@@ -9,7 +9,7 @@
   Turn raw provider reasoning into a clean, structured TUI view without changing what it means.
 </p>
 <p align="center">
-  <a href="https://github.com/rustytensor/pi-thinking-steps/releases/tag/v1.2.0"><img alt="release" src="https://img.shields.io/badge/release-v1.2.0-4f46e5" /></a>
+  <a href="https://github.com/rustytensor/pi-thinking-steps/releases/tag/v1.3.0"><img alt="release" src="https://img.shields.io/badge/release-v1.3.0-4f46e5" /></a>
   <a href="https://www.npmjs.com/package/pi-thinking-steps"><img alt="npm version" src="https://img.shields.io/npm/v/pi-thinking-steps" /></a>
   <a href="./LICENSE"><img alt="license" src="https://img.shields.io/badge/license-MIT-16a34a" /></a>
   <img alt="typescript" src="https://img.shields.io/badge/TypeScript-strict-3178c6" />
@@ -47,7 +47,7 @@ The goal is simple: **preserve meaning, improve readability, and stay native to 
 - **In-Pi review browser** — navigate recorded prompts, responses, and available thinking without another model turn
 - **Opt-in automatic snapshots** — session-specific consent, content controls, and bounded retention; off by default
 - **Terminal-first rendering** — width-aware, ANSI-safe, and live-update friendly
-- **Footer token rates** — `now · in 12,000 tok/s · out 98 tok/s` for this reply. `Alt+Shift+T` switches to the session average, `session · in 8,400 tok/s · out 71 tok/s`
+- **Footer and transcript token rates** — each reply ends with `in 12,000 tok/s · out 98 tok/s`. The footer keeps `last · in 12,000 tok/s · out 98 tok/s` and does not clear it when the next reply starts. `Alt+Shift+T` switches the footer to the session average.
 - **Faithful parsing** — deterministic step derivation and restrained summarization
 - **Markdown-aware output** — headings, bullets, ordered lists, code spans, and emphasis render cleanly
 - **Scoped persistence** — session, project, and global defaults with predictable restore precedence
@@ -78,7 +78,7 @@ Use it when you want the whole text, but formatted for a terminal instead of dum
 ## Control surface
 
 | Action | Control |
-|---|---|
+| Toggle footer token rate: last reply or session average | `Alt+Shift+T` |
 | Cycle thinking view | `Alt+T` |
 | Toggle token rate: this reply or session average | `Alt+Shift+T` |
 | Choose a mode interactively | `/thinking-steps` |
@@ -97,11 +97,9 @@ Use it when you want the whole text, but formatted for a terminal instead of dum
 
 ## Token rates
 
-The footer shows speed for the latest reply, in plain counts rather than `12k/s`.
+Each model reply ends with one line in the message area, for example `in 12,000 tok/s · out 98 tok/s`. `in` is prompt tokens per second until the first generated token. `out` is generated tokens per second after that, including reasoning. Cached prompt tokens are not counted. A reply with no measured rate adds no line.
 
-- `now · in 12,000 tok/s · out 98 tok/s` is this reply. `in` is prompt tokens per second until the first generated token. `out` is generated tokens per second after that, including reasoning.
-- `Alt+Shift+T` switches to the session average: `session · in 8,400 tok/s · out 71 tok/s`. That is all measured tokens divided by all measured time in this session, not a simple mean of each reply.
-- Cached prompt tokens are not counted as processing.
+The footer keeps the last finished reply: `last · in 12,000 tok/s · out 98 tok/s`. It is not cleared when the next reply starts. While a reply is running, the footer shows `now` only after that reply has numbers. `Alt+Shift+T` switches the footer to the session average, `session · in 8,400 tok/s · out 71 tok/s`, which is all measured tokens divided by all measured time, not a mean of each reply. A new chat starts with a blank footer. The message-area lines stay in the session.
 
 ---
 

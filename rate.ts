@@ -15,7 +15,7 @@ export interface RateClock {
 	mono(): number;
 }
 
-export type RateScope = "now" | "session";
+export type RateScope = "last" | "session";
 
 export interface RateMeter {
 	begin(startedAtMs: number): void;
@@ -24,6 +24,7 @@ export interface RateMeter {
 	finish(durationMs: number | undefined, usage: RateUsage | undefined): void;
 	reset(): void;
 	statusText(scope?: RateScope): string | undefined;
+	takeTranscriptLine(): string | undefined;
 }
 
 const FIRST_OUTPUT_EVENTS = new Set(["thinking_delta", "text_delta", "toolcall_start", "toolcall_delta"]);
@@ -77,19 +78,29 @@ export function formatTokensPerSecond(rate: number): string {
 	return Math.round(rate).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 }
 
-export function formatRateLine(scope: RateScope, promptRate: number | undefined, generationRate: number | undefined, pending: { prompt: boolean; generation: boolean }): string | undefined {
-	const parts: string[] = [scope === "session" ? "session" : "now"];
+export function formatRateLine(label: "now" | "last" | "session", promptRate: number | undefined, generationRate: number | undefined, pending: { prompt: boolean; generation: boolean }): string | undefined {
+	const parts: string[] = [label];
 	if (promptRate !== undefined) parts.push(`in ${formatTokensPerSecond(promptRate)} tok/s`);
 	else if (pending.prompt) parts.push("in ...");
 	if (generationRate !== undefined) parts.push(`out ${formatTokensPerSecond(generationRate)} tok/s`);
 	else if (pending.generation) parts.push("out ...");
-	if (parts.length === 1) return scope === "session" ? "session · no rates yet" : undefined;
+	if (parts.length === 1) return label === "session" ? "session · no rates yet" : undefined;
 	return parts.join(" · ");
+}
+
+export function formatTranscriptLine(promptRate: number | undefined, generationRate: number | undefined): string | undefined {
+	const parts: string[] = [];
+	if (promptRate !== undefined) parts.push(`in ${formatTokensPerSecond(promptRate)} tok/s`);
+	if (generationRate !== undefined) parts.push(`out ${formatTokensPerSecond(generationRate)} tok/s`);
+	return parts.length === 0 ? undefined : parts.join(" · ");
 }
 
 export function createRateMeter(clock: RateClock = { now: () => Date.now(), mono: () => performance.now() }): RateMeter {
 	let sample: RateSample | undefined;
 	let sessionTotals = emptyTotals();
+	// Kept after the sample is replaced so the next reply does not blank the footer before its own numbers arrive.
+	let lastFooter: string | undefined;
+	let pendingTranscript: string | undefined;
 
 	const elapsed = (current: RateSample, mono: number): number => {
 		return Math.max(0, (current.seenAtMs - current.startedAtMs) + (mono - current.seenMono));
@@ -104,6 +115,16 @@ export function createRateMeter(clock: RateClock = { now: () => Date.now(), mono
 		const promptMs = elapsed(current, current.firstTokenMono);
 		if (promptMs > totalMs) return { promptMs: totalMs };
 		return { promptMs, generationMs: totalMs - promptMs };
+	};
+
+	const replyLine = (current: RateSample, monoNow: number): string | undefined => {
+		const span = windows(current, monoNow);
+		const usage = current.usage;
+		if (!usage) return undefined;
+		return formatTranscriptLine(
+			tokensPerSecond(promptTokenCount(usage), span.promptMs ?? Number.NaN),
+			tokensPerSecond(generationTokenCount(usage), span.generationMs ?? Number.NaN),
+		);
 	};
 
 	return {
@@ -130,26 +151,32 @@ export function createRateMeter(clock: RateClock = { now: () => Date.now(), mono
 			if (durationMs !== undefined && Number.isFinite(durationMs)) sample.durationMs = durationMs;
 			if (usage) sample.usage = usage;
 			addMeasured(sessionTotals, sample.usage, windows(sample, clock.mono()));
+			const line = replyLine(sample, clock.mono());
+			pendingTranscript = line;
+			if (line) lastFooter = `last · ${line}`;
 		},
 		reset(): void {
 			sample = undefined;
 			sessionTotals = emptyTotals();
+			lastFooter = undefined;
+			pendingTranscript = undefined;
 		},
-		statusText(scope: RateScope = "now"): string | undefined {
+		takeTranscriptLine(): string | undefined {
+			const line = pendingTranscript;
+			pendingTranscript = undefined;
+			return line;
+		},
+		statusText(scope: RateScope = "last"): string | undefined {
 			if (scope === "session") {
 				const totals = { ...sessionTotals };
 				if (sample && !sample.finished) addMeasured(totals, sample.usage, windows(sample, clock.mono()));
 				return formatRateLine("session", tokensPerSecond(totals.promptTokens, totals.promptMs), tokensPerSecond(totals.outputTokens, totals.generationMs), { prompt: false, generation: false });
 			}
-			if (!sample) return undefined;
-			const span = windows(sample, clock.mono());
-			const usage = sample.usage;
-			const promptRate = usage ? tokensPerSecond(promptTokenCount(usage), span.promptMs ?? Number.NaN) : undefined;
-			const generationRate = usage ? tokensPerSecond(generationTokenCount(usage), span.generationMs ?? Number.NaN) : undefined;
-			return formatRateLine("now", promptRate, generationRate, {
-				prompt: !sample.finished && promptRate === undefined,
-				generation: !sample.finished && sample.firstTokenMono !== undefined && generationRate === undefined,
-			});
+			if (sample && !sample.finished) {
+				const line = replyLine(sample, clock.mono());
+				if (line) return `now · ${line}`;
+			}
+			return lastFooter;
 		},
 	};
 }

@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3.0 - 2026-11-16
+
+### Added
+
+- Each model reply ends with one line in the message area, such as `in 12,000 tok/s · out 98 tok/s`. The line is saved in the session and is not sent to the model.
+- The footer keeps the last finished reply as `last · in 12,000 tok/s · out 98 tok/s` and does not clear it when the next reply starts. While a reply is running, it shows `now` only after that reply has numbers. `Alt+Shift+T` switches the footer between that last reply and the session average.
+
 ## 1.2.0 - 2026-11-08
 
 ### Added

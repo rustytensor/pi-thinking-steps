@@ -24,6 +24,17 @@ export function renderThinkingExportFiles(data: unknown, theme: ThinkingThemeLik
 	return new Text(lines.join("\n"), 0, 0);
 }
 
+const RATE_PART = "\\d{1,3}(?:,\\d{3})*(?:\\.\\d)? tok/s";
+const RATE_LINE = new RegExp(`^(?:in ${RATE_PART})(?: · out ${RATE_PART})?$|^(?:out ${RATE_PART})$`);
+
+// Stored in the session and drawn again on reload, so only a rate line is accepted.
+export function renderRateLine(data: unknown, theme: ThinkingThemeLike): Component | undefined {
+	if (!data || typeof data !== "object") return undefined;
+	const candidate = data as { schemaVersion?: unknown; text?: unknown };
+	if (candidate.schemaVersion !== 1 || typeof candidate.text !== "string" || !RATE_LINE.test(candidate.text)) return undefined;
+	return new Text(theme.fg("muted", candidate.text), 0, 0);
+}
+
 interface RenderOptions {
 	mode: "collapsed" | "summary" | "expanded";
 	steps: DerivedThinkingStep[];
